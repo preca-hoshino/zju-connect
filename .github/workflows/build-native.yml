@@ -212,7 +212,9 @@ jobs:
           set -euo pipefail
           tag="${{ github.event_name == 'release' && github.event.release.tag_name || 'nightly' }}"
           ls -lh dist/
-          gh release upload --clobber "$tag" dist/zju-connect-*.zip
+          # This job downloads artifacts only and does not check out the
+          # repository, so gh has no git context to infer the repo from.
+          gh release upload --repo "$GITHUB_REPOSITORY" --clobber "$tag" dist/zju-connect-*.zip
 
       - name: Summarise
         run: |
