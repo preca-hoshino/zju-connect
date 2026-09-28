@@ -58,8 +58,32 @@ Requirements:
 
 - `CGO_ENABLED=1` and a C compiler for the target.
 - Android: NDK r26+ (16 KB page alignment is applied automatically).
-- The Android artifacts go to `build/android/<abi>/libzju_connect.so`; iOS to
-  `build/ios/<arch>/libzju_connect.a`.
+- iOS: macOS with Xcode, since there is no `-buildmode=c-shared` on iOS.
+
+### Output layout
+
+Every artifact goes to `build/native/<os>-<arch>/`, the layout the Dart build
+hook looks for, plus a convenience copy at `build/native/host/` for the smoke
+test. A header is copied alongside each library.
+
+```
+build/native/windows-x64/zju_connect.dll
+build/native/linux-x64/libzju_connect.so
+build/native/linux-arm64/libzju_connect.so
+build/native/macos-x64/libzju_connect.dylib
+build/native/macos-arm64/libzju_connect.dylib
+build/native/android-arm64/libzju_connect.so
+build/native/android-arm/libzju_connect.so
+build/native/android-ia32/libzju_connect.so
+build/native/ios-arm64/libzju_connect.a      # static archive
+build/native/ios-x64/libzju_connect.a        # simulator
+```
+
+Override the root with `OUT_DIR`.
+
+A single `host` build takes about a minute; a full `all` build needs both an
+Android NDK and macOS, which is why CI runs the targets on separate runners
+(`.github/workflows/build-native.yml`).
 
 ## Smoke test
 
@@ -67,13 +91,13 @@ The C ABI has a dependency-free smoke test that exercises argument validation
 and handle lifecycle (no live server required):
 
 ```sh
-go build -buildmode=c-shared -o build/libzju_connect.so ./binding/capi
-cc -I binding/capi/include -o build/smoke binding/capi/test/smoke.c \
-   -L build -lzju_connect -Wl,-rpath,build
+binding/build.sh host
+cc -I build/native/host -o build/smoke binding/capi/test/smoke.c \
+   -L build/native/host -lzju_connect -Wl,-rpath,build/native/host
 ./build/smoke
 ```
 
-On Windows use `libzju_connect.dll` and put `build/` on `PATH`.
+On Windows the library is `zju_connect.dll`; put `build/native/host` on `PATH`.
 
 ## Notes for host authors
 
@@ -81,4 +105,7 @@ On Windows use `libzju_connect.dll` and put `build/` on `PATH`.
   and feed them back through the config to resume without a full login.
 - `zcSetup`, `zcReadPacket` and `zcStartProxy` block; call them off the UI
   thread.
+- Strings passed to the event and challenge callbacks transfer ownership to the
+  host, which must release them with `zcFreeString`. This is required because a
+  Dart `NativeCallable.listener` decodes the string asynchronously.
 - `zcClose` tears down the session; `zcFree` releases the handle. Call both.

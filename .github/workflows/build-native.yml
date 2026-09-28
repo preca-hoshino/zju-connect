@@ -1,0 +1,188 @@
+name: Build Native Library
+
+# Builds the Go shared library consumed by flutter/sangfor_vpn_client.
+#
+# The Dart package cannot ship these artifacts inside the .pub archive: pub.dev
+# rejects packages larger than 100 MB, and a single platform's library is around
+# 27 MB. Instead every release carries one zip per target
+# (zju-connect-<os>-<arch>.zip) and the package's build hook downloads the one
+# it needs. See flutter/sangfor_vpn_client/hook/build.dart.
+
+on:
+  release:
+    types: [published]
+  push:
+    paths:
+      - "binding/**"
+      - "client/**"
+      - "configs/**"
+      - "dial/**"
+      - "internal/**"
+      - "log/**"
+      - "resolve/**"
+      - "service/**"
+      - "stack/**"
+      - "underlay/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/build-native.yml"
+  pull_request:
+    paths:
+      - "binding/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/build-native.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # Keep in sync with the layout binding/build.sh writes and the Dart hook reads.
+  OUT_DIR: ${{ github.workspace }}/artifacts
+
+jobs:
+  desktop:
+    name: ${{ matrix.key }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest, key: linux-x64, file: libzju_connect.so }
+          - { runner: macos-13, key: macos-x64, file: libzju_connect.dylib }
+          - { runner: macos-latest, key: macos-arm64, file: libzju_connect.dylib }
+          - { runner: windows-latest, key: windows-x64, file: zju_connect.dll }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        shell: bash
+        run: bash binding/build.sh host
+
+      - name: Verify the library was produced
+        shell: bash
+        run: |
+          test -f "$OUT_DIR/${{ matrix.key }}/${{ matrix.file }}" \
+            || { echo "::error::${{ matrix.file }} missing for ${{ matrix.key }}"; exit 1; }
+          ls -lh "$OUT_DIR/${{ matrix.key }}"
+
+      - name: Package
+        shell: bash
+        run: |
+          cd "$OUT_DIR"
+          zip -9 -r "zju-connect-${{ matrix.key }}.zip" "${{ matrix.key }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zju-connect-${{ matrix.key }}
+          path: ${{ env.OUT_DIR }}/zju-connect-${{ matrix.key }}.zip
+          if-no-files-found: error
+
+  android:
+    name: android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build all Android ABIs
+        shell: bash
+        run: |
+          # The runner ships the Android SDK and NDK; build.sh finds the NDK
+          # through ANDROID_NDK_HOME or $ANDROID_HOME/ndk.
+          echo "NDK candidates:"
+          ls -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/ndk/* 2>/dev/null || true
+          bash binding/build.sh android
+
+      - name: Verify and package
+        shell: bash
+        run: |
+          cd "$OUT_DIR"
+          for abi in android-arm64 android-arm android-ia32; do
+            test -f "$abi/libzju_connect.so" \
+              || { echo "::error::libzju_connect.so missing for $abi"; exit 1; }
+            zip -9 -r "zju-connect-$abi.zip" "$abi"
+          done
+          ls -lh *.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zju-connect-android
+          path: ${{ env.OUT_DIR }}/zju-connect-android-*.zip
+          if-no-files-found: error
+
+  ios:
+    name: ios
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build iOS archives
+        shell: bash
+        run: bash binding/build.sh ios
+
+      - name: Verify and package
+        shell: bash
+        run: |
+          cd "$OUT_DIR"
+          for arch in ios-arm64 ios-x64; do
+            test -f "$arch/libzju_connect.a" \
+              || { echo "::error::libzju_connect.a missing for $arch"; exit 1; }
+            zip -9 -r "zju-connect-$arch.zip" "$arch"
+          done
+          ls -lh *.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zju-connect-ios
+          path: ${{ env.OUT_DIR }}/zju-connect-ios-*.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish release assets
+    needs: [desktop, android, ios]
+    if: github.event_name == 'release' || (github.event_name == 'push' && contains(vars.NIGHTLY_RELEASE_ENABLED_BRANCHES || '', github.ref_name))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Upload zips to the release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ github.event_name == 'release' && github.event.release.tag_name || 'nightly' }}"
+          ls -lh dist/
+          gh release upload --clobber "$tag" dist/zju-connect-*.zip
+
+      - name: Summarise
+        run: |
+          {
+            echo "### Native library artifacts"
+            echo
+            echo "| Target | Archive |"
+            echo "| --- | --- |"
+            for f in dist/zju-connect-*.zip; do
+              echo "| $(basename "$f" .zip | sed 's/^zju-connect-//') | \`$(basename "$f")\` |"
+            done
+            echo
+            echo "Consume these by setting \`download-url\` in the app's pubspec.yaml."
+          } >> "$GITHUB_STEP_SUMMARY"
