@@ -77,6 +77,22 @@ func handleFatal(err error) bool {
 	return true
 }
 
+// HasFatalHandler reports whether a fatal handler is installed, i.e. whether
+// this process is running as an embedded library rather than a standalone CLI.
+//
+// Code that would otherwise terminate the host process (os.Exit in a background
+// goroutine, for instance) uses this to decide between the two behaviours.
+func HasFatalHandler() bool {
+	fatalMu.RLock()
+	defer fatalMu.RUnlock()
+	return fatalHandler != nil
+}
+
+// Output returns the writer that currently receives log output.
+func Output() io.Writer {
+	return currentOutput()
+}
+
 func EnableDebug() {
 	debug.Store(true)
 }
