@@ -29,3 +29,6 @@ aTrustData.json
 client_data.json
 *.keylog
 *.pcap
+
+# Native library build output (see binding/)
+build/
