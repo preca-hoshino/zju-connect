@@ -15,7 +15,8 @@ headers:
   include-directives:
     - '../../binding/capi/include/zju_connect.h'
 # The shared library is opened manually so the same bindings work with a bundled
-# dylib/so/dll and with an iOS static framework. See lib/src/native_library.dart.
+# dylib/so/dll and with an iOS static framework. The SDK loads it from the
+# code asset registered by hook/build.dart.
 ffi-native:
   asset-id: 'package:sangfor_vpn_client/zju_connect.dart'
 functions:
@@ -31,5 +32,9 @@ comments:
   style: any
   length: full
 
+# ffigen needs libclang. On Windows it only searches C:\Program Files\LLVM\bin
+# by default, so point this at wherever LLVM is installed (or delete the key and
+# install LLVM to that default location). It does not affect the build output.
 llvm-path:
   - C:\DevToolChain\LLVM
+
