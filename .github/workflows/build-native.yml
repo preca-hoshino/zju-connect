@@ -49,8 +49,11 @@ jobs:
       matrix:
         include:
           - { runner: ubuntu-latest, key: linux-x64, file: libzju_connect.so }
-          - { runner: macos-13, key: macos-x64, file: libzju_connect.dylib }
-          - { runner: macos-latest, key: macos-arm64, file: libzju_connect.dylib }
+          # Both macOS slices are built on the arm64 runner: clang on an arm64
+          # host cross-compiles the x64 slice, whereas the Intel runner image is
+          # slow to provision (builds were stuck queued for minutes).
+          - { runner: macos-latest, key: macos-x64, file: libzju_connect.dylib, target_arch: amd64 }
+          - { runner: macos-latest, key: macos-arm64, file: libzju_connect.dylib, target_arch: arm64 }
           - { runner: windows-latest, key: windows-x64, file: zju_connect.dll }
     runs-on: ${{ matrix.runner }}
     steps:
@@ -63,6 +66,8 @@ jobs:
 
       - name: Build
         shell: bash
+        env:
+          TARGET_GOARCH: ${{ matrix.target_arch }}
         run: bash binding/build.sh host
 
       - name: Verify the library was produced
@@ -75,8 +80,20 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          cd "$OUT_DIR"
-          zip -9 -r "zju-connect-${{ matrix.key }}.zip" "${{ matrix.key }}"
+          # `zip` is absent on the Windows runner, so pack with Python, which
+          # every runner provides.
+          python - <<'PY'
+          import os, zipfile
+          key = "${{ matrix.key }}"
+          out = os.environ["OUT_DIR"]
+          archive = os.path.join(out, f"zju-connect-{key}.zip")
+          with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+              for name in sorted(os.listdir(os.path.join(out, key))):
+                  path = os.path.join(out, key, name)
+                  if os.path.isfile(path):
+                      z.write(path, f"{key}/{name}")
+          print(f"packaged {archive}")
+          PY
 
       - uses: actions/upload-artifact@v4
         with:
@@ -111,9 +128,21 @@ jobs:
           for abi in android-arm64 android-arm android-ia32; do
             test -f "$abi/libzju_connect.so" \
               || { echo "::error::libzju_connect.so missing for $abi"; exit 1; }
-            zip -9 -r "zju-connect-$abi.zip" "$abi"
           done
-          ls -lh *.zip
+          # `zip` is not installed on every runner; Python is.
+          python - <<'PY'
+          import os, zipfile
+          out = os.environ["OUT_DIR"]
+          for abi in ("android-arm64", "android-arm", "android-ia32"):
+              archive = os.path.join(out, f"zju-connect-{abi}.zip")
+              with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+                  for name in sorted(os.listdir(os.path.join(out, abi))):
+                      path = os.path.join(out, abi, name)
+                      if os.path.isfile(path):
+                          z.write(path, f"{abi}/{name}")
+              print(f"packaged {archive}")
+          PY
+          ls -1 "$OUT_DIR"/zju-connect-android-*.zip
 
       - uses: actions/upload-artifact@v4
         with:
@@ -143,9 +172,21 @@ jobs:
           for arch in ios-arm64 ios-x64; do
             test -f "$arch/libzju_connect.a" \
               || { echo "::error::libzju_connect.a missing for $arch"; exit 1; }
-            zip -9 -r "zju-connect-$arch.zip" "$arch"
           done
-          ls -lh *.zip
+          # `zip` is not installed on every runner; Python is.
+          python - <<'PY'
+          import os, zipfile
+          out = os.environ["OUT_DIR"]
+          for arch in ("ios-arm64", "ios-x64"):
+              archive = os.path.join(out, f"zju-connect-{arch}.zip")
+              with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+                  for name in sorted(os.listdir(os.path.join(out, arch))):
+                      path = os.path.join(out, arch, name)
+                      if os.path.isfile(path):
+                          z.write(path, f"{arch}/{name}")
+              print(f"packaged {archive}")
+          PY
+          ls -1 "$OUT_DIR"/zju-connect-ios-*.zip
 
       - uses: actions/upload-artifact@v4
         with:
