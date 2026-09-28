@@ -3,6 +3,7 @@ package resolve
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -132,9 +133,15 @@ func (r *Resolver) Resolve(ctx context.Context, host string) (resCtx context.Con
 
 		if fakeIPValue := ctx.Value(ContextKeyFakeIP); fakeIPValue != nil {
 			if domainResourceFound {
-				ip := r.IPPool.GenerateIP(host, domainResources)
-				log.Printf("%s -> %s (Fake IP)", host, ip.String())
-				return ctx, ip, nil
+				ip, err := r.IPPool.GenerateIP(host, domainResources)
+				if err != nil {
+					// The fake IP range is exhausted. Fall through to a real DNS
+					// lookup instead of aborting the whole process.
+					log.Printf("Generate fake IP for %s failed: %s, falling back to DNS", host, err)
+				} else {
+					log.Printf("%s -> %s (Fake IP)", host, ip.String())
+					return ctx, ip, nil
+				}
 			}
 		}
 	}
@@ -377,7 +384,7 @@ func (r *Resolver) Close() {
 	})
 }
 
-func NewResolver(stack stack.Stack, remoteDNSServer, secondaryDNSServer string, ttl uint64, domainResources client.DomainResources, dnsResource map[string][]net.IP, useRemoteDNS bool) *Resolver {
+func NewResolver(stack stack.Stack, remoteDNSServer, secondaryDNSServer string, ttl uint64, domainResources client.DomainResources, dnsResource map[string][]net.IP, useRemoteDNS bool) (*Resolver, error) {
 	//domainSuffixTree := domainsuffixtrie.NewDomainSuffixTrie[bool]()
 	//for domain := range domainResource {
 	//	_ = domainSuffixTree.AddDomainSuffix(domain, true)
@@ -424,8 +431,8 @@ func NewResolver(stack stack.Stack, remoteDNSServer, secondaryDNSServer string, 
 	var err error
 	resolver.IPPool, err = ippool.NewIPPool[[]client.DomainResource]("198.18.0.0/16")
 	if err != nil {
-		log.Fatalf("Create Fake IP Pool failed: %v", err)
+		return nil, fmt.Errorf("create fake IP pool: %w", err)
 	}
 
-	return resolver
+	return resolver, nil
 }

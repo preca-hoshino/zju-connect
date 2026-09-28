@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/mythologyli/zju-connect/client/atrust/auth"
@@ -39,7 +40,14 @@ func (c *Client) startSessionRefresh(refresh func(context.Context) (auth.LoginRe
 				return
 			}
 			if errors.Is(err, auth.ErrSessionInvalid) {
-				log.Fatalf("aTrust session maintenance failed: %v", err)
+				// Record the failure so every subsequent operation fails fast
+				// instead of using a dead SID, then report it. The CLI has no
+				// fatal handler installed and still exits; embedding hosts
+				// install one and receive the error without losing the process.
+				sessionErr := errors.New(fmt.Sprintf("aTrust session maintenance failed: %v", err))
+				c.setSessionSID("", sessionErr)
+				log.Fatal(sessionErr)
+				return
 			}
 			if err != nil {
 				log.Printf("aTrust authConfig refresh failed: %v", err)

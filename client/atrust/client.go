@@ -24,6 +24,19 @@ import (
 	"inet.af/netaddr"
 )
 
+// isSessionInvalidCode reports whether aTrust rejected the request because the
+// session is no longer valid and reauthentication is required.
+func isSessionInvalidCode(code int64) bool {
+	return code == 10000004 || code == 75500002
+}
+
+// sessionInvalidError builds the error returned when the server reports an
+// invalid session. The message intentionally matches the historical
+// log.Fatalf text so diagnostics and log-scraping keep working.
+func sessionInvalidError(prefix string, code int64, message string) error {
+	return errors.New(fmt.Sprintf("%s: aTrust session is invalid (code %d): %s", prefix, code, message))
+}
+
 type SessionOptions struct {
 	Username string
 	SID      string

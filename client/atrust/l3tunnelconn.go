@@ -92,6 +92,31 @@ type l3TunnelConn struct {
 	authWake           chan struct{}
 	writeFrameHook     func([]byte) error
 	dataStream         []byte
+
+	// sessionErr carries the unrecoverable "session is invalid" error out of
+	// readLoop, which cannot return one of its own. It is the terminal signal
+	// that the tunnel must not be reconnected. Before this existed the CLI
+	// relied on log.Fatal terminating the process.
+	sessionErr atomic.Pointer[error]
+}
+
+// reportSessionInvalid records the first unrecoverable session error and closes
+// the connection so readers stop waiting on it.
+func (c *l3TunnelConn) reportSessionInvalid(err error) {
+	e := err
+	if c.sessionErr.CompareAndSwap(nil, &e) {
+		if c.tlsConn != nil {
+			_ = c.Close()
+		}
+	}
+}
+
+// sessionInvalidError returns the recorded session error, if any.
+func (c *l3TunnelConn) sessionInvalidError() error {
+	if p := c.sessionErr.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 type authIP struct {
@@ -273,7 +298,12 @@ func (c *l3TunnelConn) readLoop() {
 			}
 		case cmdAuthResp:
 			log.DebugPrintf("l3-tunnel recv auth resp status=%d payloadLen=%d", fr.status, len(fr.payload))
-			c.handleAuthResp(fr.status, fr.payload)
+			if err := c.handleAuthResp(fr.status, fr.payload); err != nil {
+				// The session is gone; report it to the tunnel owner and stop
+				// reading so the reader does not spin on a dead session.
+				c.reportSessionInvalid(err)
+				return
+			}
 		case cmdSecondVipResp:
 			log.DebugPrintf("l3-tunnel recv vip update cmd=0x%02x status=%d payloadLen=%d", fr.cmd, fr.status, len(fr.payload))
 			c.handleSecondVipResp(fr.status, fr.payload)
@@ -520,14 +550,16 @@ func (c *l3TunnelConn) sendAuthRequest(ct *conntrack, meta packetMeta) error {
 	return c.writeFrame(payload)
 }
 
-func (c *l3TunnelConn) handleAuthResp(status byte, payload []byte) {
+func (c *l3TunnelConn) handleAuthResp(status byte, payload []byte) error {
 	var resp authResponseIP
 	if err := json.Unmarshal(payload, &resp); err != nil {
 		c.markAuthErrorFromPayload(payload, err)
-		return
+		return nil
 	}
-	if resp.Code == 10000004 || resp.Code == 75500002 {
-		log.Fatalf("l3-tunnel resource auth: aTrust session is invalid (code %d): %s", resp.Code, resp.Message)
+	if isSessionInvalidCode(resp.Code) {
+		err := sessionInvalidError("l3-tunnel resource auth", resp.Code, resp.Message)
+		log.Fatal(err)
+		return err
 	}
 	ct := c.conntrackMgr.getByID(resp.Data.ConntrackHash)
 	if ct == nil {
@@ -535,25 +567,26 @@ func (c *l3TunnelConn) handleAuthResp(status byte, payload []byte) {
 	}
 	if ct == nil {
 		c.markAuthErrorFromPayload(payload, fmt.Errorf("missing conntrack hash"))
-		return
+		return nil
 	}
 	authID := ct.authID
 	if status != 0 {
 		if status == authImmediateRetryStatus {
 			c.scheduleAuthRetry(authID, 0)
-			return
+			return nil
 		}
 		if isRetryableAuthResponse(status, resp) {
 			c.scheduleAuthRetry(authID, defaultAuthRetryWait)
-			return
+			return nil
 		}
 		c.completeAuthentication(authID, "", fmt.Errorf("auth status %d: %s", status, resp.Message))
-		return
+		return nil
 	}
 
 	token := resp.Data.ConnectToken
 	log.DebugPrintf("l3-tunnel auth resp code=%d conntrack=%d tokenLen=%d", resp.Code, resp.Data.ConntrackHash, len(token))
 	c.completeAuthentication(authID, token, nil)
+	return nil
 }
 
 func isRetryableAuthResponse(status byte, resp authResponseIP) bool {
@@ -935,8 +968,10 @@ func (c *l3TunnelConn) authTunnel() error {
 		if err := json.Unmarshal(payload, &resp); err != nil {
 			return err
 		}
-		if resp.Code == 10000004 || resp.Code == 75500002 {
-			log.Fatalf("l3-tunnel: aTrust session is invalid (code %d): %s", resp.Code, resp.Message)
+		if isSessionInvalidCode(resp.Code) {
+			err := sessionInvalidError("l3-tunnel", resp.Code, resp.Message)
+			log.Fatal(err)
+			return err
 		}
 		if resp.Code != 0 {
 			return fmt.Errorf("l3-tunnel tunnel auth failed: %d %s", resp.Code, resp.Message)

@@ -3,6 +3,7 @@ package ippool
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 )
@@ -63,16 +64,19 @@ func (p *IPPool[T]) SetIPDomain(ip net.IP, domain string, res T) error {
 	return nil
 }
 
-func (p *IPPool[T]) GenerateIP(domain string, res T) net.IP {
+// GenerateIP returns the fake IP bound to domain, allocating one if needed.
+// Allocation fails when the configured range is exhausted; callers are
+// expected to fall back to a real DNS lookup rather than losing the process.
+func (p *IPPool[T]) GenerateIP(domain string, res T) (net.IP, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	if e, ok := p.domainToIP[domain]; ok {
-		return uint32ToIP(e.ipUint)
+		return uint32ToIP(e.ipUint), nil
 	}
 
 	if p.currentIP > p.maxIP {
-		panic("Fake IP range exhausted")
+		return nil, fmt.Errorf("fake IP range exhausted")
 	}
 
 	newIP := p.currentIP
@@ -86,7 +90,7 @@ func (p *IPPool[T]) GenerateIP(domain string, res T) net.IP {
 	p.ipToDomain[newIP] = newEntry
 	p.currentIP++
 
-	return uint32ToIP(newIP)
+	return uint32ToIP(newIP), nil
 }
 
 func (p *IPPool[T]) GetDomain(ip net.IP) (string, T, bool) {

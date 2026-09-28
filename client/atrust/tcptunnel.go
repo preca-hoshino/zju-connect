@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -167,8 +166,10 @@ func parseTCPTunnelAuthResponse(data string) error {
 		return fmt.Errorf("failed to parse tcp tunnel auth response: %w", err)
 	}
 	if response.Code != 0 {
-		if response.Code == 10000004 || response.Code == 75500002 {
-			log.Fatalf("tcp tunnel: aTrust session is invalid (code %d): %s", response.Code, response.Message)
+		if isSessionInvalidCode(response.Code) {
+			err := sessionInvalidError("tcp tunnel", response.Code, response.Message)
+			log.Fatal(err)
+			return err
 		}
 		return fmt.Errorf("tcp tunnel authentication failed (code %d): %s", response.Code, response.Message)
 	}
@@ -437,14 +438,6 @@ func (c *tcpTunnelConn) SetReadDeadline(t time.Time) error {
 
 func (c *tcpTunnelConn) SetWriteDeadline(t time.Time) error {
 	return c.tlsConn.SetWriteDeadline(t)
-}
-
-func randUint64() string {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic(err)
-	}
-	return fmt.Sprint(binary.BigEndian.Uint64(b[:]))
 }
 
 func calcXRequestSig(key []byte, data []byte) string {

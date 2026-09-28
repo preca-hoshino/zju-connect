@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mythologyli/zju-connect/client"
@@ -33,6 +34,28 @@ type L3Tunnel struct {
 	dataChan  chan []byte
 	closeCh   chan struct{}
 	closeOnce sync.Once
+
+	// sessionErr records the unrecoverable "session is invalid" error so that
+	// L3Conn.Read can return it instead of blocking forever once the tunnel
+	// stops reconnecting.
+	sessionErr atomic.Pointer[error]
+}
+
+// reportSessionInvalid records the first unrecoverable session error and wakes
+// up any reader blocked on the tunnel.
+func (t *L3Tunnel) reportSessionInvalid(err error) {
+	e := err
+	if t.sessionErr.CompareAndSwap(nil, &e) {
+		t.Close()
+	}
+}
+
+// SessionInvalidError returns the recorded session error, if any.
+func (t *L3Tunnel) SessionInvalidError() error {
+	if p := t.sessionErr.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 type l3TunnelConnectCall struct {
@@ -250,6 +273,12 @@ func (t *L3Tunnel) forwardFromConn(nodeGroupID string, conn *l3TunnelConn) {
 		pkt, err := conn.ReadPacket()
 		if err != nil {
 			t.evictConn(nodeGroupID, conn)
+			// An invalid session is terminal: reconnecting would just be
+			// rejected again. Surface it to L3Conn.Read instead of looping.
+			if sessionErr := conn.sessionInvalidError(); sessionErr != nil {
+				t.reportSessionInvalid(sessionErr)
+				return
+			}
 			t.startReconnect(nodeGroupID)
 			return
 		}

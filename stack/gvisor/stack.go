@@ -231,7 +231,8 @@ func (s *Stack) Run() {
 	var connErr error
 	s.endpoint.l3Conn, connErr = s.endpoint.client.NewL3Conn()
 	if connErr != nil {
-		panic(connErr)
+		log.Printf("gVisor stack: unable to create L3 connection: %v", connErr)
+		return
 	}
 	// Read from VPN server and send to gVisor stack
 	buf := make([]byte, maxInboundPacketSize)
@@ -240,9 +241,13 @@ func (s *Stack) Run() {
 		if err != nil {
 			if hook_func.IsTerminal() {
 				return
-			} else {
-				panic(err)
 			}
+			// A read failure is terminal for this stack. Panicking used to take
+			// the whole host process down, which is unacceptable once the stack
+			// is embedded in a library; return instead and let the owner decide
+			// whether to restart.
+			log.Printf("gVisor stack: read from VPN server failed: %v", err)
+			return
 		}
 		log.DebugPrintf("Recv: read %d bytes", n)
 		log.DebugDumpHex(buf[:n])

@@ -28,6 +28,11 @@ func (c *L3Conn) Read(p []byte) (n int, err error) {
 	case <-c.closeCh:
 		return 0, net.ErrClosed
 	case <-c.l3Tunnel.closeCh:
+		// A session-invalid shutdown is terminal and must be distinguishable
+		// from an ordinary close, otherwise the caller retries a dead session.
+		if sessionErr := c.l3Tunnel.SessionInvalidError(); sessionErr != nil {
+			return 0, sessionErr
+		}
 		return 0, io.EOF
 	}
 }
@@ -38,6 +43,9 @@ func (c *L3Conn) Write(p []byte) (n int, err error) {
 	case <-c.closeCh:
 		return 0, net.ErrClosed
 	case <-c.l3Tunnel.closeCh:
+		if sessionErr := c.l3Tunnel.SessionInvalidError(); sessionErr != nil {
+			return 0, sessionErr
+		}
 		return 0, net.ErrClosed
 	default:
 	}
