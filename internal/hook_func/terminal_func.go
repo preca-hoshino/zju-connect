@@ -63,3 +63,28 @@ func IsTerminal() bool {
 
 	return terminalBegin
 }
+
+// Reset clears the registered cleanup functions and the terminal flag.
+//
+// The CLI registers its hooks once and exits, so this is unnecessary there.
+// An embedding host (the Flutter bindings, for example) may connect and
+// disconnect repeatedly in one process; without a reset the second login
+// would find terminalBegin already set and silently skip registering its own
+// cleanup functions, leaking the previous session's state.
+func Reset() {
+	terminalMu.Lock()
+	defer terminalMu.Unlock()
+
+	terminalFuncList = nil
+	terminalBegin = false
+}
+
+// ResetInitial clears the initial-function list.
+//
+// Like Reset it exists for hosts that run more than one session per process.
+// The initial functions are invoked once, before the first connection, so a
+// second run needs the list and the completion flag to start clean.
+func ResetInitial() {
+	initialFuncList = nil
+	initialEnd = false
+}
