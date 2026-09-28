@@ -1,0 +1,35 @@
+# Run with `dart run ffigen --config ffigen.yaml`.
+#
+# The header is the single source of truth shared with the Go side. It lives at
+# the repository root so the C ABI has exactly one definition; regenerate the
+# bindings whenever it changes.
+name: ZjuConnectBindings
+description: |
+  Bindings for the zju-connect C ABI (binding/capi/include/zju_connect.h).
+
+  Regenerate with: dart run ffigen --config ffigen.yaml
+output: 'lib/zju_connect_bindings_generated.dart'
+headers:
+  entry-points:
+    - '../../binding/capi/include/zju_connect.h'
+  include-directives:
+    - '../../binding/capi/include/zju_connect.h'
+# The shared library is opened manually so the same bindings work with a bundled
+# dylib/so/dll and with an iOS static framework. See lib/src/native_library.dart.
+ffi-native:
+  asset-id: 'package:sangfor_vpn_client/zju_connect.dart'
+functions:
+  include:
+    - 'zc[A-Z].*'
+  # The static trampolines in the Go preamble are internal to the library.
+  exclude:
+    - 'zc_emit_.*'
+unions:
+  include:
+    - 'None'
+comments:
+  style: any
+  length: full
+
+llvm-path:
+  - C:\DevToolChain\LLVM

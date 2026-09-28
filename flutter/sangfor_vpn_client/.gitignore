@@ -1,0 +1,20 @@
+# Dart / Flutter build output.
+.dart_tool/
+.packages
+build/
+
+# Test coverage.
+coverage/
+
+# IDE.
+.idea/
+*.iml
+.vscode/
+
+# Native libraries produced by binding/build.sh are copied into build/ or
+# native/ for local testing and must not be committed (they are tens of MB).
+native/
+*.dll
+*.so
+*.dylib
+*.a

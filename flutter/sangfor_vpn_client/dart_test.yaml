@@ -1,0 +1,9 @@
+# Declares the custom tags used by the test suite.
+#
+# `native` marks tests that load and call the real shared library. They are part
+# of the default run, but can be excluded from environments without a built
+# library:
+#
+#   dart test --exclude-tags native
+tags:
+  native:
