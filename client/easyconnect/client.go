@@ -188,6 +188,14 @@ func (c *Client) DNSServers() ([]string, error) {
 	return append([]string(nil), c.dnsServers...), nil
 }
 
+// TwfID returns the session identifier (TwfID) obtained during login. It can be
+// persisted and supplied as Options.SessionID to resume the session without
+// authenticating again, which matters for embedding hosts that are frequently
+// restarted by the mobile OS.
+func (c *Client) TwfID() string {
+	return c.twfID
+}
+
 func (c *Client) CanUseTCPTunnel() bool {
 	return false
 }

@@ -111,6 +111,15 @@ func (ep *Endpoint) WritePackets(list stack.PacketBufferList) (int, tcpip.Error)
 				// is strictly better than panicking with a gvisor stack
 				// trace, which obscures the actual cause.
 				if errors.Is(err, easyconnect.ErrSangforShutdown) {
+					if log.HasFatalHandler() {
+						// Embedded library: never kill the host process from a
+						// background goroutine. Surface the error through the
+						// installed fatal handler instead and let the owner
+						// decide how to recover.
+						log.Printf("WritePackets: server SHUTDOWN")
+						log.Fatal(err)
+						return list.Len(), nil
+					}
 					log.Printf("WritePackets: server SHUTDOWN; running cleanup hooks and exiting for clean restart")
 					if !hook_func.IsTerminal() {
 						hook_func.ExecTerminalFunc(context.Background())
@@ -118,11 +127,12 @@ func (ep *Endpoint) WritePackets(list stack.PacketBufferList) (int, tcpip.Error)
 					os.Exit(2)
 				}
 
-				if hook_func.IsTerminal() {
-					return list.Len(), nil
-				} else {
-					panic(err)
-				}
+				// WritePackets has no way to report a Go error to gVisor, and
+				// panicking would take down an embedding host. Record the
+				// failure and stop writing; the read loop will observe the
+				// broken tunnel and terminate the session.
+				log.Printf("gVisor stack: write to VPN server failed: %v", err)
+				return list.Len(), nil
 			}
 			log.DebugPrintf("Send: wrote %d bytes", n)
 			log.DebugDumpHex(buf[:n])
