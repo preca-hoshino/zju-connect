@@ -346,7 +346,7 @@ func main() {
 		}
 	}
 
-	vpnResolver := resolve.NewResolver(
+	vpnResolver, err := resolve.NewResolver(
 		vpnStack,
 		remoteDNSServer,
 		secondaryDNSServer,
@@ -355,6 +355,9 @@ func main() {
 		dnsResource,
 		useRemoteDNS,
 	)
+	if err != nil {
+		log.Fatalf("Create resolver: %v", err)
+	}
 	hook_func.RegisterTerminalFunc("CloseResolver", func(ctx context.Context) error {
 		vpnResolver.Close()
 		return nil
