@@ -374,12 +374,38 @@ func (c *Client) loginTOTP() error {
 		_ = Body.Close()
 	}(resp.Body)
 
-	if !strings.Contains(buf.String(), "Totp auth succ") {
+	response := buf.String()
+	log.DebugPrintf("TOTP verification response: %s", response)
+
+	// Sangfor servers do not agree on how an accepted token is reported.
+	// ZJU-style builds answer with the bare "Totp auth succ" marker, while
+	// others (e.g. SHU, vpn2.shu.edu.cn M7.6.8R2) return the regular <Auth>
+	// envelope where <Result>1</Result>, <ErrorMsg>Successful</ErrorMsg> and
+	// <pwpErrorCode>0</pwpErrorCode> signal success. A non-zero pwpErrorCode
+	// means the token was rejected; 16 is the benign "profile redirect" code
+	// already tolerated on cert logins, so it is accepted here as well.
+	totpSuccess := strings.Contains(response, "Totp auth succ")
+	pwpCode := ""
+	if pwpErr := regexp.MustCompile(`<pwpErrorCode>\s*(\d+)\s*</pwpErrorCode>`).FindStringSubmatch(response); pwpErr != nil {
+		pwpCode = pwpErr[1]
+	}
+	if pwpCode == "" || pwpCode == "0" || pwpCode == "16" {
+		totpSuccess = totpSuccess ||
+			strings.Contains(response, "<Result>1</Result>") ||
+			strings.Contains(response, "<ErrorMsg>Successful</ErrorMsg>")
+	}
+	if !totpSuccess {
 		debug.PrintStack()
-		return errors.New("TOTP verification failed: " + buf.String())
+		return errors.New("TOTP verification failed: " + response)
 	}
 
-	c.twfID = string(regexp.MustCompile(`<TwfID>(.*)</TwfID>`).FindSubmatch(buf.Bytes())[1])
+	twfIDMatch := regexp.MustCompile(`<TwfID>(.*)</TwfID>`).FindSubmatch(buf.Bytes())
+	if twfIDMatch != nil {
+		c.twfID = string(twfIDMatch[1])
+		log.Printf("Update TWFID: %s", c.twfID)
+	} else {
+		log.Print("Warning: TOTP response carries no TwfID, keeping the current session")
+	}
 	log.Print("TOTP verification success")
 
 	return nil
