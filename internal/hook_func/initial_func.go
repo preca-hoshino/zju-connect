@@ -2,13 +2,11 @@ package hook_func
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 
 	"github.com/mythologyli/zju-connect/configs"
 	"github.com/mythologyli/zju-connect/log"
-	netstat "github.com/shirou/gopsutil/v4/net"
 )
 
 type InitialFunc func(ctx context.Context, config configs.Config) error
@@ -47,52 +45,36 @@ func IsInitial() bool {
 	return initialEnd
 }
 
+// checkBindPortLegal validates that the configured listen addresses parse and
+// carry a non-zero port.
+//
+// It deliberately does not inspect the live socket table: that used to rely on
+// gopsutil, which drags in `purego` and therefore a cgo requirement on iOS.
+// This package is compiled into the Flutter bindings, so the dependency had to
+// go. Binding the port afterwards still surfaces a real conflict as a listen
+// error; this only loses the earlier, friendlier message.
 func checkBindPortLegal(ctx context.Context, config configs.Config) error {
-	var checkTCPPorts, checkUDPPorts []uint32
-	checkTCPPortsStr := []string{config.HTTPBind, config.SocksBind}
-	checkUDPPortsStr := []string{config.DNSServerBind}
+	_ = ctx
 
-	for _, addrStr := range checkTCPPortsStr {
-		if len(addrStr) != 0 {
-			addr, err := net.ResolveTCPAddr("tcp", addrStr)
-			if err != nil || addr.Port == 0 {
-				return errors.New(fmt.Sprintf("the value for %s in the config is incorrect. Please refer to the README for the correct format", addr))
-			}
-			checkTCPPorts = append(checkTCPPorts, uint32(addr.Port))
+	for _, addrStr := range []string{config.HTTPBind, config.SocksBind} {
+		if len(addrStr) == 0 {
+			continue
+		}
+		addr, err := net.ResolveTCPAddr("tcp", addrStr)
+		if err != nil || addr.Port == 0 {
+			return fmt.Errorf("the value %q for the listen address is incorrect. Please refer to the README for the correct format", addrStr)
 		}
 	}
 
-	for _, addrStr := range checkUDPPortsStr {
-		if len(addrStr) != 0 {
-			addr, err := net.ResolveUDPAddr("udp", addrStr)
-			if err != nil || addr.Port == 0 {
-				return errors.New(fmt.Sprintf("the value for %s in the config is incorrect. Please refer to the README for the correct format", addr))
-			}
-			checkUDPPorts = append(checkUDPPorts, uint32(addr.Port))
+	for _, addrStr := range []string{config.DNSServerBind} {
+		if len(addrStr) == 0 {
+			continue
+		}
+		addr, err := net.ResolveUDPAddr("udp", addrStr)
+		if err != nil || addr.Port == 0 {
+			return fmt.Errorf("the value %q for the DNS listen address is incorrect. Please refer to the README for the correct format", addrStr)
 		}
 	}
 
-	for _, kind := range []string{"tcp", "udp"} {
-		connectionStats, err := netstat.Connections(kind)
-		if err != nil {
-			// skip this check due to lack of information
-			return nil
-		}
-		var targetCheckPorts []uint32
-		if kind == "tcp" {
-			targetCheckPorts = checkTCPPorts
-		} else {
-			targetCheckPorts = checkUDPPorts
-		}
-		for _, conn := range connectionStats {
-			for _, checkPort := range targetCheckPorts {
-				// darwin "*" means "0.0.0.0"
-				if checkPort == conn.Laddr.Port && (conn.Laddr.IP == "::" || conn.Laddr.IP == "*" ||
-					conn.Laddr.IP == "0.0.0.0" || conn.Laddr.IP == "127.0.0.1") {
-					return errors.New(fmt.Sprintf("%s port %s is already in use by process %d. Please choose a different port or terminate the existing process", kind, conn.Laddr.String(), conn.Pid))
-				}
-			}
-		}
-	}
 	return nil
 }
