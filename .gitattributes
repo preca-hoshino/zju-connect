@@ -1,0 +1,12 @@
+# Normalise line endings. With core.autocrlf=true, shell scripts and headers
+# must stay LF or they break on the target platforms.
+* text=auto
+
+*.sh text eol=lf
+*.go text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+
+*.png binary
+*.jpg binary
+*.pcap binary
