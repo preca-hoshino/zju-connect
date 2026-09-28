@@ -35,16 +35,18 @@ build_host() {
 	local os arch ext
 	os="$(go env GOOS)"
 	arch="$(go env GOARCH)"
+	# The Dart side expects each platform's conventional file name: the loader
+	# and the build hook both key on it.
 	case "$os" in
-		windows) ext="dll" ;;
-		darwin) ext="dylib" ;;
-		*) ext="so" ;;
+		windows) name="zju_connect.dll" ;;
+		darwin) name="libzju_connect.dylib" ;;
+		*) name="libzju_connect.so" ;;
 	esac
 
 	log "building host library (${os}/${arch})"
-	CGO_ENABLED=1 go build -buildmode=c-shared -o "${OUT_DIR}/libzju_connect.${ext}" "$PKG"
+	CGO_ENABLED=1 go build -buildmode=c-shared -o "${OUT_DIR}/${name}" "$PKG"
 	cp "${REPO_ROOT}/binding/capi/include/zju_connect.h" "${OUT_DIR}/zju_connect.h"
-	log "wrote ${OUT_DIR}/libzju_connect.${ext}"
+	log "wrote ${OUT_DIR}/${name}"
 }
 
 android_ndk_home() {

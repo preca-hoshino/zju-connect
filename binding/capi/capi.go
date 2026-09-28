@@ -98,16 +98,22 @@ type zcEventSink struct {
 	onChal   C.zc_challenge_fn
 }
 
+// event hands the message to the host.
+//
+// The C string is NOT freed here: the host owns it and must release it with
+// zcFreeString. This is required because a Dart NativeCallable.listener posts
+// the call to a port and decodes the string later, asynchronously; freeing it
+// as soon as the callback returns would hand Dart a dangling pointer.
 func (s *zcEventSink) event(event binding.Event) {
-	cMessage := C.CString(event.Message)
-	defer C.free(unsafe.Pointer(cMessage))
-	C.zc_emit_event(s.onEvent, s.userData, C.int(event.Type), cMessage)
+	C.zc_emit_event(s.onEvent, s.userData, C.int(event.Type), C.CString(event.Message))
 }
 
+// challenge hands an authentication challenge to the host.
+//
+// As with event, the payload string is owned by the host and must be freed with
+// zcFreeString.
 func (s *zcEventSink) challenge(challenge binding.Challenge) {
-	cPayload := C.CString(challenge.Payload)
-	defer C.free(unsafe.Pointer(cPayload))
-	C.zc_emit_challenge(s.onChal, s.userData, C.longlong(challenge.ID), cPayload)
+	C.zc_emit_challenge(s.onChal, s.userData, C.longlong(challenge.ID), C.CString(challenge.Payload))
 }
 
 // zcNew creates a session. configJSON is a JSON object matching binding.Config.

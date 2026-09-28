@@ -44,14 +44,18 @@ enum {
 /*
  * zc_event_fn receives asynchronous events (logs, state changes, errors).
  *
- * message is UTF-8 and only valid for the duration of the call.
+ * The callback may be invoked from any thread and, for asynchronous hosts such
+ * as Dart's NativeCallable.listener, may be delivered after this function has
+ * returned. The host therefore OWNS the message string and must release it with
+ * zcFreeString once it is done with it.
  */
 typedef void (*zc_event_fn)(void *user_data, int type, const char *message);
 
 /*
  * zc_challenge_fn receives an authentication challenge. The host must answer it
  * with zcRespondChallenge using the same challenge_id. payload is a JSON object
- * whose schema depends on the challenge kind.
+ * whose schema depends on the challenge kind. Ownership of payload transfers to
+ * the host, which must release it with zcFreeString.
  */
 typedef void (*zc_challenge_fn)(void *user_data, int64_t challenge_id, const char *payload);
 

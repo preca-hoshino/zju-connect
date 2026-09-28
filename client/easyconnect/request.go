@@ -18,7 +18,6 @@ import (
 	"net/url"
 	"regexp"
 	"runtime"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -71,7 +70,6 @@ func (c *Client) loginAuthAndPsw(graphCodeFile string) error {
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		debug.PrintStack()
 		return err
 	}
 
@@ -314,7 +312,6 @@ func (c *Client) loginSMS() error {
 	log.DebugPrintf("SMS verification response: %s", buf.String())
 
 	if !strings.Contains(buf.String(), "Auth sms suc") && !strings.Contains(buf.String(), "欢迎访问") {
-		debug.PrintStack()
 		return errors.New("SMS code verification failed: " + buf.String())
 	}
 
@@ -395,7 +392,6 @@ func (c *Client) loginTOTP() error {
 			strings.Contains(response, "<ErrorMsg>Successful</ErrorMsg>")
 	}
 	if !totpSuccess {
-		debug.PrintStack()
 		return errors.New("TOTP verification failed: " + response)
 	}
 
@@ -477,7 +473,6 @@ func (c *Client) loginCert() error {
 		strings.Contains(response, "Login successfully") ||
 		strings.Contains(response, "Auth cert suc")
 	if !certSuccess {
-		debug.PrintStack()
 		return errors.New("Cert verification failed: " + response)
 	}
 
