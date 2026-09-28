@@ -80,20 +80,37 @@ library_file_name() {
 
 build_host() {
 	local os arch key name
-	os="$(go env GOOS)"
-	arch="$(go env GOARCH)"
+	# TARGET_GOOS/TARGET_GOARCH allow cross-compiling from one runner, which
+	# matters for macOS: the Intel runner image is retired or heavily queued, so
+	# the x64 slice is built from an arm64 runner instead.
+	os="${TARGET_GOOS:-$(go env GOOS)}"
+	arch="${TARGET_GOARCH:-$(go env GOARCH)}"
 	key="$(target_key "$os" "$arch")"
 	name="$(library_file_name "$os")"
 
+	# Cross-compiling with clang requires the target architecture to be stated
+	# explicitly; the host architecture is assumed otherwise.
+	local cflags=""
+	if [[ "$os" == "darwin" && -n "${TARGET_GOARCH:-}" ]]; then
+		local carch min
+		if [[ "$arch" == "amd64" ]]; then carch=x86_64; else carch="$arch"; fi
+		min="${MACOS_MIN:-11.0}"
+		cflags="-arch ${carch} -mmacosx-version-min=${min}"
+	fi
+
 	log "building host library (${os}/${arch} -> ${key})"
 	mkdir -p "${OUT_DIR}/${key}" "${OUT_DIR}/host"
-	CGO_ENABLED=1 go build -buildmode=c-shared \
+	CGO_ENABLED=1 GOOS="$os" GOARCH="$arch" \
+		CGO_CFLAGS="$cflags" CGO_LDFLAGS="$cflags" \
+		go build -buildmode=c-shared \
 		-o "${OUT_DIR}/${key}/${name}" "$PKG"
 	cp "$HEADER" "${OUT_DIR}/${key}/zju_connect.h"
 	# A stable top-level path for the C smoke test and for
-	# `ZJU_CONNECT_LIBRARY_DIR`.
-	cp "${OUT_DIR}/${key}/${name}" "${OUT_DIR}/host/${name}"
-	cp "$HEADER" "${OUT_DIR}/host/zju_connect.h"
+	# `ZJU_CONNECT_LIBRARY_DIR`, only meaningful for a native build.
+	if [[ -z "${TARGET_GOOS:-}" && -z "${TARGET_GOARCH:-}" ]]; then
+		cp "${OUT_DIR}/${key}/${name}" "${OUT_DIR}/host/${name}"
+		cp "$HEADER" "${OUT_DIR}/host/zju_connect.h"
+	fi
 	log "wrote ${OUT_DIR}/${key}/${name}"
 }
 
@@ -149,28 +166,34 @@ build_ios() {
 	fi
 
 	local min="${IOS_MIN:-13.0}" triple
-	for triple in "arm64 arm64-apple-ios${min}" \
-		"amd64 x86_64-apple-ios${min}-simulator"; do
+	for triple in "arm64 arm64-apple-ios${min} iphoneos arm64" \
+		"amd64 x86_64-apple-ios${min}-simulator iphonesimulator x86_64"; do
 		set -- $triple
-		local goarch="$1" ctriple="$2"
-		local key cc sdk sdk_path
+		local goarch="$1" key cc sdk sdk_path arch_flag min_flag
 		key="$(target_key ios "$goarch")"
-		if [[ "$goarch" == "amd64" ]]; then
-			sdk=iphonesimulator
-		else
-			sdk=iphoneos
-		fi
+		sdk="$3"
+		arch_flag="$4"
+
 		cc="$(xcrun --sdk "$sdk" --find clang)"
-		# The Go toolchain does not configure the iOS sysroot itself (that is
-		# gomobile's job), so pass it explicitly or the C compile step fails to
-		# find the iOS headers.
+		# The Go toolchain does not configure the iOS sysroot or the target
+		# architecture itself (that is gomobile's job), so pass them explicitly.
+		# Without -arch, clang for the simulator SDK targets the host
+		# architecture (arm64 on current runners), which would clash with
+		# GOARCH=amd64 and fail at link time.
 		sdk_path="$(xcrun --sdk "$sdk" --show-sdk-path)"
-		log "building ios/${goarch} (${key}, ${sdk})"
+		if [[ "$sdk" == "iphoneos" ]]; then
+			min_flag="-miphoneos-version-min=${min}"
+		else
+			min_flag="-mios-simulator-version-min=${min}"
+		fi
+		local flags="-isysroot ${sdk_path} -arch ${arch_flag} ${min_flag}"
+
+		log "building ios/${goarch} (${key}, ${sdk}/${arch_flag})"
 		mkdir -p "${OUT_DIR}/${key}"
 		# iOS has no -buildmode=c-shared; a c-archive is linked into the app.
 		CGO_ENABLED=1 GOOS=ios GOARCH="$goarch" CC="$cc" \
-			CGO_CFLAGS="-isysroot ${sdk_path}" \
-			CGO_LDFLAGS="-isysroot ${sdk_path}" \
+			CGO_CFLAGS="$flags" \
+			CGO_LDFLAGS="$flags" \
 			go build -buildmode=c-archive \
 			-o "${OUT_DIR}/${key}/libzju_connect.a" "$PKG"
 		cp "$HEADER" "${OUT_DIR}/${key}/zju_connect.h"
