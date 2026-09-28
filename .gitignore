@@ -23,3 +23,9 @@ go.work
 
 # Config file
 config.toml
+
+# Login session data (contains cookies / credentials)
+aTrustData.json
+client_data.json
+*.keylog
+*.pcap
