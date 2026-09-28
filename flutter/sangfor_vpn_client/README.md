@@ -123,7 +123,29 @@ administrator/root privileges. Proxy mode does not.
 ## Getting the native library
 
 The `hook/build.dart` hook locates a prebuilt library; it does not compile Go.
-Build one from the repository root first:
+There are two ways to provide one.
+
+### Download a release archive (recommended for apps)
+
+The CI publishes one zip per target (`zju-connect-<os>-<arch>.zip`) on every
+release. Point the hook at the release's base URL in your app's
+`pubspec.yaml`:
+
+```yaml
+hooks:
+  user_defines:
+    sangfor_vpn_client:
+      download-url: https://github.com/preca-hoshino/zju-connect/releases/download/v0.1.0/
+```
+
+The hook then fetches `zju-connect-<os>-<arch>.zip`, extracts the library and
+caches it under `<package>/.dart_tool/zju_connect_cache/`, so a rebuild does not
+re-download. Override the cache location with `ZJU_CONNECT_CACHE_DIR`.
+
+A download is used because pub.dev rejects packages larger than 100 MB, and a
+single platform's library is around 27 MB.
+
+### Build locally (for development in this repository)
 
 ```sh
 binding/build.sh host      # current platform
@@ -131,17 +153,21 @@ binding/build.sh android   # all Android ABIs
 binding/build.sh ios       # iOS static archives
 ```
 
-The hook looks for the artifact, in order:
+Artifacts land in `build/native/<os>-<arch>/`.
 
-1. `hooks.user_defines.sangfor_vpn_client.library.<os>-<arch>` in the consuming
-   app's `pubspec.yaml`.
+### Resolution order
+
+For a given target, the hook tries, in order:
+
+1. `hooks.user_defines.sangfor_vpn_client.library.<os>-<arch>` — an explicit
+   path wins.
 2. The `ZJU_CONNECT_LIBRARY_DIR` environment variable.
-3. `native/<os>-<arch>/` inside this package (for a checked-in or pre-downloaded
-   artifact).
-4. The repository's `build/` directory, for a developer host build.
+3. `native/<os>-<arch>/` inside this package.
+4. A downloaded release archive, when `download-url` is set.
+5. `<repo>/build/native/<os>-<arch>/`, for a developer host build.
 
-If none is found, the build fails with instructions rather than at runtime with
-a missing symbol.
+If none is found, the build fails with the full list of options rather than at
+runtime with a missing symbol.
 
 ## Regenerating the FFI bindings
 

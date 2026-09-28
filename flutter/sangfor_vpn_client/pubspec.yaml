@@ -11,6 +11,10 @@ environment:
   sdk: ^3.13.2
 
 dependencies:
+  # Used only by hook/build.dart, to unpack a downloaded release archive. The
+  # archive package is needed because pub.dev rejects packages over 100 MB,
+  # while the Go library alone is roughly 27 MB per platform.
+  archive: ^4.3.0
   code_assets: ^1.1.0
   ffi: ^2.1.4
   hooks: ^2.0.0

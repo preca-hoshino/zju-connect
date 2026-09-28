@@ -12,5 +12,8 @@ Initial implementation.
 - Two-phase authentication for SMS/TOTP codes, text and click captchas and
   CAS/OAuth2 login pages.
 - `hook/build.dart` locates the prebuilt Go library per target instead of
-  compiling C, and reports a clear error when none is available.
+  compiling C. It can download and cache a release archive (configured with
+  `download-url`), which is how the artifacts reach consumers without exceeding
+  the pub.dev size limit, and reports a clear error listing every option when no
+  library is available.
 - ffigen bindings generated from `binding/capi/include/zju_connect.h`.
